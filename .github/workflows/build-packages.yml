@@ -15,6 +15,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # The repository token cannot read UEPseudo and would shadow the one below.
+          persist-credentials: false
+
+      # UE4SS's deps/first/Unreal submodule is the private Re-UE4SS/UEPseudo.
+      # UEPSEUDO_TOKEN must belong to an account that can read it.
+      - name: Authorize git for UEPseudo
+        shell: pwsh
+        env:
+          UEPSEUDO_TOKEN: ${{ secrets.UEPSEUDO_TOKEN }}
+        run: |
+          if (-not $env:UEPSEUDO_TOKEN) { throw 'The UEPSEUDO_TOKEN secret is not set.' }
+          $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("x-access-token:$($env:UEPSEUDO_TOKEN)"))
+          Write-Output "::add-mask::$basic"
+          git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $basic"
 
       - name: Build RuneSchema
         shell: cmd
