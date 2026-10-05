@@ -170,8 +170,10 @@ namespace DragonWilds {
         else
             PS::Log<LogLevel::Normal>(STR(
                 "[SAVE-ENTRY][DISABLED] Corrupt-character entry recovery is disabled by default. Native character acceptance remains unchanged.\n"));
+#ifdef _WIN32 // linux-port: native hooks and pak mounting (stage 3)
         HookDatatableSerialize();
         SetupAlternativePakPathReader();
+#endif
     }
 
     void DragonWildsMainLoader::Initialize()
@@ -180,6 +182,7 @@ namespace DragonWilds {
         // Some WinGDK builds do not materialize the DataTable CDO/vtable during
         // PreInitialize. Retry once Unreal is ready, without duplicating a hook
         // that was already installed successfully.
+#ifdef _WIN32 // linux-port: native hooks (stage 3). HookGameInstanceInit reads vtable slot 90, the Windows layout
         if (DatatableSerializeCallbacks.empty())
             HookDatatableSerialize();
         if (!PS::Storefront::IsDedicatedServer())
@@ -210,6 +213,7 @@ namespace DragonWilds {
                 PS::Log<LogLevel::Normal>(STR(
                     "[SERVER][REGISTRY-DEFERRED] Runtime cloning and registration will begin after the dedicated server reaches InitGameState.\n"));
         }
+#endif
         // GameInstance::Init and the optional DataTable hook remain the earliest
         // paths.  A game-thread tick is the storefront-agnostic fallback.  It
         // avoids initializing loaders in on_unreal_init before their target
@@ -261,7 +265,7 @@ namespace DragonWilds {
         }
 
         std::advance(it, 2);
-        auto modName = it->native();
+        auto modName = RC::to_generic_string(it->native());
 
         std::advance(it, 1);
         auto folderType = PS::ModFolderLayout::AsciiLower(it->string());
@@ -308,7 +312,7 @@ namespace DragonWilds {
             if (fs::exists(modsPath))
                 for (const auto& entry : fs::directory_iterator(modsPath))
                     if (PS::ModFolderLayout::LooksLikeRuneSchemaMod(entry.path()))
-                        discovered.push_back(entry.path().filename().native());
+                        discovered.push_back(RC::to_generic_string(entry.path().filename().native()));
             m_orderedMods = ModLoadOrder::Resolve(modsPath, discovered);
             m_orderResolved = true;
             for (const auto& name : m_orderedMods)
@@ -338,6 +342,7 @@ namespace DragonWilds {
         InitializeMods(EEngineLifecyclePhase::GameInstanceInit);
         LoadMods(EEngineLifecyclePhase::GameInstanceInit);
 
+#ifdef _WIN32 // linux-port: building and string loaders, data registrar, registry bridge (stages 2 to 4)
         if (m_buildingLoader)
         {
             try {m_buildingLoader->ActivateWorldRegistration();}
@@ -364,6 +369,9 @@ namespace DragonWilds {
         }
         try {m_registryBridge.Start();}
         catch(const std::exception& error){PS::Log<LogLevel::Error>(STR("[DEGRADED][SERVICE:registry-bridge] Networking bridge unavailable: {}.\n"),PS::ToWideSafe(error.what()));}
+#else
+        PS::Log<LogLevel::Warning>(STR("Linux port in progress: the data registrar and the registry bridge are not started.\n"));
+#endif
         PS::StartupTrace::Mark("GameInstanceInit loaders complete (deferred world work may remain)");
     }
 
@@ -423,6 +431,7 @@ namespace DragonWilds {
     void DragonWildsMainLoader::CreateLoaders()
     {
         RegisterLoader(std::make_unique<DragonWildsRegistryLoader>(m_registryBridge));
+#ifdef _WIN32 // linux-port: every loader below, and the wiring between them (stages 2 and 4)
         RegisterLoader(std::make_unique<DragonWildsEquipmentLoader>());
         RegisterLoader(std::make_unique<DragonWildsGameplayEffectLoader>());
         RegisterLoader(std::make_unique<DragonWildsNiagaraLoader>());
@@ -512,6 +521,9 @@ namespace DragonWilds {
         auto stringModLoader = std::make_unique<DragonWildsStringModLoader>();
         m_stringLoader = stringModLoader.get();
         RegisterLoader(std::move(stringModLoader));
+#else
+        PS::Log<LogLevel::Warning>(STR("Linux port in progress: only the registry loader is active. Other mod folders are ignored.\n"));
+#endif
 
     }
 
@@ -542,6 +554,7 @@ namespace DragonWilds {
                         if (std::find(m_orderedMods.begin(), m_orderedMods.end(), pendingAutoReload.ModName) == m_orderedMods.end()) continue;
                         if (!PS::PSConfig::Get()->IsLoaderEnabled(pendingAutoReload.FolderType)) continue;
                         bool handled = false;
+#ifdef _WIN32 // linux-port: spawn loader (stage 4)
                         if (pendingAutoReload.FolderType == "players" && m_spawnLoader)
                         {
                             m_spawnLoader->LoadPlayerRules(
@@ -568,6 +581,7 @@ namespace DragonWilds {
                                 pendingAutoReload.ModName);
                             handled = true;
                         }
+#endif
                         for (auto& loader : m_loaders)
                         {
                             if (handled) break;
@@ -753,30 +767,33 @@ namespace DragonWilds {
 
     void DragonWildsMainLoader::LoadMods(EEngineLifecyclePhase engineLifecyclePhase)
     {
+#ifdef _WIN32 // linux-port: recipe loader (stage 2)
         if (engineLifecyclePhase == EEngineLifecyclePhase::GameInstanceInit
             && PS::PSConfig::Get()->IsLoaderEnabled("recipes")) {
             for (auto& loader : m_loaders) if (loader->GetModFolderType() == "recipes")
                 try {static_cast<DragonWildsRecipeModLoader*>(loader.get())->PrepareReferences();}
                 catch(const std::exception& error){PS::Log<LogLevel::Warning>(STR("[LOADER:recipes][PARTIAL] Reference preparation failed: {}. Other loaders continue.\n"),PS::ToWideSafe(error.what()));}
         }
+#endif
         // Definitions must exist before any mod's property or appearance consumers.
         if(engineLifecyclePhase==EEngineLifecyclePhase::PostEngineInit) {
             for(auto& loader:m_loaders) {
                 const auto& kind=loader->GetModFolderType();
                 if(kind!="effects" && kind!="niagara")continue;
-                IterateModsFolder([&](const fs::path& path,const fs::path::string_type& owner) {
+                IterateModsFolder([&](const fs::path& path,const RC::StringType& owner) {
                     loader->Load(path,owner,engineLifecyclePhase);
                 });
                 try {loader->FinalizeLoad(engineLifecyclePhase);}
                 catch(const std::exception& error){PS::Log<LogLevel::Warning>(STR("[LOADER:{}][PARTIAL] Definition finalization failed: {}. Other loaders continue.\n"),RC::to_generic_string(kind),PS::ToWideSafe(error.what()));}
             }
         }
+#ifdef _WIN32 // linux-port: spawn loader, appearance sources (stage 4)
         if (engineLifecyclePhase == EEngineLifecyclePhase::PostEngineInit && m_spawnLoader
             && PS::PSConfig::Get()->IsLoaderEnabled("players"))
         {
             m_spawnLoader->ClearAppearanceSources();
             IterateModsFolder([&](const fs::path& modPath,
-                const fs::path::string_type& modName)
+                const RC::StringType& modName)
             {
                 try
                 {
@@ -790,8 +807,9 @@ namespace DragonWilds {
                 }
             });
         }
+#endif
 
-        IterateModsFolder([&](const fs::path& modPath, const fs::path::string_type& modName)
+        IterateModsFolder([&](const fs::path& modPath, const RC::StringType& modName)
         {
             try
             {
@@ -840,12 +858,13 @@ namespace DragonWilds {
             }
         }
 
+#ifdef _WIN32 // linux-port: spawn loader, nameplates and player rules (stage 4)
         if (engineLifecyclePhase == EEngineLifecyclePhase::PostEngineInit && m_spawnLoader
             && PS::PSConfig::Get()->IsLoaderEnabled("players"))
         {
             if (PS::PSConfig::Get()->IsLoaderEnabled("nameplates"))
             {
-                IterateModsFolder([&](const fs::path& modPath, const fs::path::string_type& modName) {
+                IterateModsFolder([&](const fs::path& modPath, const RC::StringType& modName) {
                     const auto nameplatesPath = PS::ModFolderLayout::ResolveLoaderDirectory(modPath,"nameplates");
                     if (nameplatesPath)try {m_spawnLoader->LoadNameplateDefinitions(*nameplatesPath, modName);}
                     catch(const std::exception& error){PS::Log<LogLevel::Warning>(STR("[LOADER:nameplates][PARTIAL][MOD:{}] Section skipped: {}. Other mods continue.\n"),modName,PS::ToWideSafe(error.what()));}
@@ -854,7 +873,7 @@ namespace DragonWilds {
                 catch(const std::exception& error){PS::Log<LogLevel::Warning>(STR("[LOADER:nameplates][PARTIAL] Finalization failed: {}. Other loaders continue.\n"),PS::ToWideSafe(error.what()));}
             }
             IterateModsFolder([&](const fs::path& modPath,
-                const fs::path::string_type& modName)
+                const RC::StringType& modName)
             {
                 const auto playersPath = PS::ModFolderLayout::ResolveLoaderDirectory(modPath,"players");
                 if (!playersPath) return;
@@ -872,6 +891,7 @@ namespace DragonWilds {
             try {m_spawnLoader->FinalizePlayerRules();}
             catch(const std::exception& error){PS::Log<LogLevel::Warning>(STR("[LOADER:players][PARTIAL] Finalization failed: {}. Other loaders continue.\n"),PS::ToWideSafe(error.what()));}
         }
+#endif
         if (engineLifecyclePhase == EEngineLifecyclePhase::GameInstanceInit
             && PS::PSConfig::Get()->GetSettings().advancedRuntime
             && PS::PSConfig::Get()->GetSettings().diagnostics.persistenceLedger)
@@ -880,11 +900,13 @@ namespace DragonWilds {
             {
                 const auto output = PS::HostServices::ReferencesDirectory()
                     / "PersistenceLedger.json";
+                std::vector<fs::path::string_type> orderedNames;
+                for (const auto& name : m_orderedMods) orderedNames.push_back(fs::path(name).native());
                 PS::PersistenceDiagnostics::Write(
-                    GetModsPath(), m_orderedMods, output);
+                    GetModsPath(), orderedNames, output);
                 PS::Log<LogLevel::Normal>(
                     STR("Persistence diagnostic ledger written to '{}'. It is not a cleanup authority.\n"),
-                    output.native());
+                    RC::to_generic_string(output.native()));
             }
             catch (const std::exception& error)
             {
@@ -935,7 +957,7 @@ namespace DragonWilds {
             std::error_code scanError;
             const auto paks=PS::ModFolderLayout::ResolveLoaderDirectory(entry.path(),PS::ModFolderLayout::PakDirectory);
             const bool legacy=PS::ModFolderLayout::ContainsLegacyPakContent(entry.path(),scanError);
-            if((paks.has_value()||legacy)&&!scanError)discovered.push_back(entry.path().filename().native());
+            if((paks.has_value()||legacy)&&!scanError)discovered.push_back(RC::to_generic_string(entry.path().filename().native()));
         }
         try {for(const auto& name:ModLoadOrder::Resolve(modsRoot,discovered)) {
             pakRoots.push_back(modsRoot/name);
@@ -954,7 +976,7 @@ namespace DragonWilds {
             if(!fs::is_directory(pakRoot))continue;
             const auto canonical=fs::weakly_canonical(pakRoot).wstring();if(!registered.emplace(canonical).second)continue;
             const auto absolute = pakRoot.native();
-            const auto withSuffix = std::format(STR("{}/"), RC::to_generic_string(absolute));
+            const auto withSuffix = RC::to_generic_string(absolute) + STR("/");
             OutPakFolders->Add(FString(withSuffix.c_str()));
             ++addedPakDirectories;
         }

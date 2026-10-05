@@ -39,7 +39,7 @@ namespace DragonWilds {
         OnSetup();
     }
 
-    void DragonWildsModLoaderBase::AutoReload(const std::filesystem::path::string_type& modName, const std::filesystem::path& modFilePath)
+    void DragonWildsModLoaderBase::AutoReload(const RC::StringType& modName, const std::filesystem::path& modFilePath)
     {
         if (HasInitialized()) OnAutoReload(modName, modFilePath);
     }
@@ -171,7 +171,7 @@ namespace DragonWilds {
 
     void DragonWildsModLoaderBase::OnLoad(const std::filesystem::path& loaderPath, const RC::StringType& modName, const EEngineLifecyclePhase& engineLifecyclePhase) {}
 
-    void DragonWildsModLoaderBase::OnAutoReload(const std::filesystem::path::string_type& modName, const std::filesystem::path& modFilePath) {}
+    void DragonWildsModLoaderBase::OnAutoReload(const RC::StringType& modName, const std::filesystem::path& modFilePath) {}
 
     void DragonWildsModLoaderBase::OnFinalizeLoad(const EEngineLifecyclePhase&) {}
 

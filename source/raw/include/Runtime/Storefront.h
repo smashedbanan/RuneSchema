@@ -1,6 +1,8 @@
 #pragma once
 
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 #include <algorithm>
 #include <cwctype>
 #include <filesystem>
@@ -29,6 +31,7 @@ namespace PS::Storefront {
 
     inline bool HasPackageIdentity() noexcept
     {
+#ifdef _WIN32
         using GetCurrentPackageFullNameFn = LONG(WINAPI*)(UINT32*, PWSTR);
         const HMODULE kernel32 = ::GetModuleHandleW(L"kernel32.dll");
         if (!kernel32) return false;
@@ -41,6 +44,9 @@ namespace PS::Storefront {
         UINT32 length = 0;
         const auto result = get_current_package_full_name(&length, nullptr);
         return result == ERROR_INSUFFICIENT_BUFFER && length > 1;
+#else
+        return false;
+#endif
     }
 
     inline Detection DetectFrom(const std::filesystem::path& executable, bool packageIdentity)
@@ -83,12 +89,19 @@ namespace PS::Storefront {
 
     inline Detection Detect() noexcept
     {
+#ifdef _WIN32
         try {
             wchar_t executable[32768]{};
             const auto length = GetModuleFileNameW(nullptr, executable, _countof(executable));
             if (!length || length >= _countof(executable)) return {};
             return DetectFrom(std::filesystem::path(std::wstring(executable, length)), HasPackageIdentity());
         } catch (...) { return {}; }
+#else
+        // Kind::Unknown selects the shared-safe lane: no embedded signature is used on Linux.
+        Detection result;
+        result.Reason = L"Linux dedicated server";
+        return result;
+#endif
     }
 
     inline const Detection& CurrentDetection() noexcept

@@ -4,6 +4,10 @@
 #include "SDK/Structs/FSoftObjectPtr.h"
 
 namespace UECustom {
+#ifndef _WIN32
+    // Clang expands UE4SS's UE_REQUIRES to a constraint that names UE:: without RC::Unreal::.
+    namespace UE = RC::Unreal::UE;
+#endif
     template<typename UEType>
     class TSoftObjectPtr
     {

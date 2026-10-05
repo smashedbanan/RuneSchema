@@ -122,7 +122,7 @@ class Runtime {
         catch(const std::exception& e){try{Report("weather restore warning: "+std::string(e.what()));}catch(...) {}}
         weatherActive=false;weatherToken.clear();
     }
-    static UFunction* ZeroArgument(const TCHAR* path) {
+    static UFunction* ZeroArgument(const RC::Unreal::TCHAR* path) {
         using namespace RC::Unreal;
         auto* fn=UECustom::UObjectGlobals::StaticFindObject<UFunction*>(nullptr,nullptr,path,false);
         if(!fn || fn->GetParmsSize()!=0 || fn->GetReturnProperty())throw std::runtime_error("Event zero-argument function layout changed");

@@ -7,7 +7,9 @@
 #include "SDK/Helper/Memory.h"
 #include "Unreal/UObject.hpp"
 #include "ASMHelper/ASMHelper.hpp"
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 #include <utility>
 
 using namespace RC;
@@ -24,11 +26,17 @@ namespace DragonWilds {
 
         bool IsExecutable(void* address)
         {
+#ifdef _WIN32 // linux-port: executable-page check for Linux (stage 3, with the native hooks)
             MEMORY_BASIC_INFORMATION memory{};
             if (!address || !VirtualQuery(address, &memory, sizeof(memory))
                 || memory.State != MEM_COMMIT || (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
             return (memory.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ
                 | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+#else
+            // Fails closed: no address validates, so no native binding resolves.
+            (void)address;
+            return false;
+#endif
         }
     }
 

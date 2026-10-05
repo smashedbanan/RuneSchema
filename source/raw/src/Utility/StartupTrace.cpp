@@ -1,6 +1,11 @@
 #include "Utility/StartupTrace.h"
 #include "Utility/Config.h"
+#ifdef _WIN32
 #include <Windows.h>
+#else
+#include <thread>
+#include <unistd.h>
+#endif
 #include <chrono>
 #include <fstream>
 #include <mutex>
@@ -11,6 +16,12 @@ std::mutex Mutex;
 std::ofstream Stream;
 std::filesystem::path Folder;
 std::chrono::steady_clock::time_point Start;
+#ifndef _WIN32
+// Stand-ins for the three Windows calls below.
+auto GetCurrentProcessId() { return getpid(); }
+auto GetCurrentThreadId() { return std::this_thread::get_id(); }
+void OutputDebugStringA(const char*) {}
+#endif
 }
 void Begin(const std::filesystem::path& folder) noexcept {
     try {
