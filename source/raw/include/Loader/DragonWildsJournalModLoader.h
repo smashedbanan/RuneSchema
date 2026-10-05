@@ -110,7 +110,7 @@ namespace DragonWilds {
 
         void TrackOwnedId(RC::Unreal::UObject* entry, const RC::Unreal::FString& persistenceId,const RC::StringType& owner,bool declared=false);
         void InstallNativePersistence();
-        RC::Unreal::UObject* ResolveSoftReference(const TCHAR* classPath,
+        RC::Unreal::UObject* ResolveSoftReference(const RC::Unreal::TCHAR* classPath,
             const RC::StringType& reference, ReferenceIndex& index);
         void ResetFinalizeCaches();
     };

@@ -17,7 +17,7 @@ class DragonWildsEventLoader final:public DragonWildsModLoaderBase {
         if(observer!=RC::Unreal::Hook::ERROR_ID)RC::Unreal::Hook::UnregisterCallback(observer);
         observer=RC::Unreal::Hook::ERROR_ID;
     }
-    static RC::Unreal::UFunction* NativeSignal(const TCHAR* path) {
+    static RC::Unreal::UFunction* NativeSignal(const RC::Unreal::TCHAR* path) {
         using namespace RC::Unreal;
         auto* fn=UECustom::UObjectGlobals::StaticFindObject<UFunction*>(nullptr,nullptr,path,false);
         if(!fn || !(fn->GetFunctionFlags() & FUNC_Native) || fn->GetParmsSize()!=0 || fn->GetReturnProperty())throw std::runtime_error("Event native signal layout unavailable");
