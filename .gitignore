@@ -1,3 +1,10 @@
+### CLAUDE FINE SLOP ###
+.claude/
+.superpowers/
+docs/superpowers/
+CLAUDE.md
+ue4ss-linux-build/
+
 # CMake and IDE output
 build/
 build-*/

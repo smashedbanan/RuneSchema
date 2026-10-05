@@ -10,6 +10,19 @@ It is a template for registry declarations, not a global table that every mod
 edits. Each mod creates and cooks its own data-asset instance. This lets many
 content PAKs register together without replacing one another.
 
+## Bridge boundary
+
+RuneSchema's cooked bridge PAKs provide transport and registration boundaries;
+they do not own another mod's gameplay. Every mod that uses a bridge must cook
+its own complete Blueprints, data, and content into its own PAK. Authors should
+reuse the game's existing Blueprint behavior wherever it already works and use
+RuneSchema only for the missing registration, authority, or replication step.
+
+Do not move mod-specific attacks, spells, followers, audio behavior, or other
+gameplay into RuneSchema's shared PAKs. The mod-owned Blueprint remains the
+source of truth and the bridge carries only stable identifiers and validated
+requests.
+
 The complete runtime triplet is included and enabled in the RuneSchema
 Universal package as the `RuneSchema.RegistryBridge` plugin. It is optional for
 players whose installed mods do not use it. The Core package does not include
@@ -54,6 +67,32 @@ For each content mod:
 
 The shared base belongs only in RuneSchema's PAK. The mod-owned data-asset
 instance belongs in the mod's PAK.
+
+### IoStore packages without Asset Registry metadata
+
+Some manually assembled IoStore containers do not contribute their cooked
+declaration to the game's `Asset Registry` metadata. RuneSchema cannot safely
+enumerate arbitrary UTOC internals or guess gameplay paths. For these packages,
+use the deterministic declaration path:
+
+```text
+/Game/Mods/<ModFolder>/Registry/DA_RuneSchemaRegistry_<ModFolder>
+```
+
+The complete object path repeats the asset name after the dot. For a RuneSchema
+mod folder named `Bard`, that is:
+
+```text
+/Game/Mods/Bard/Registry/DA_RuneSchemaRegistry_Bard.DA_RuneSchemaRegistry_Bard
+```
+
+`ModFolder` may contain only letters, numbers, and underscores and is capped at
+64 characters for this fallback. The cooked asset must set `RegistryOwner` to
+that exact folder name. RuneSchema directly loads only this one bounded path
+for each enabled mod in the resolved load order. Missing paths are ignored;
+owner mismatches are rejected. The declaration may still reference gameplay
+assets under a different permanent namespace, which preserves existing save
+and object paths.
 
 ## Authoring files and runtime files
 

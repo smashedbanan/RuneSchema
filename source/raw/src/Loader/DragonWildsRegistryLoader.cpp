@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include "Core/ConfigFiles.h"
 #include "Core/CookedPakRegistryManifest.h"
+#include "Core/MountedModRegistryOwners.h"
 #include "Runtime/HostServices.h"
 #include "Runtime/RegistryBridge.h"
 #include "Utility/Config.h"
@@ -25,6 +26,7 @@ namespace {
 using json=nlohmann::json;
 constexpr std::size_t MaxEntriesPerDocument=256;
 constexpr std::size_t MaxPresentationsPerEntry=64;
+constexpr std::size_t MaxPresentationKeysPerConsumer=256;
 constexpr std::size_t MaxCookedRegistryBytes=256*1024;
 
 bool Identifier(const std::string& value) {
@@ -59,6 +61,13 @@ json AuthorDocument(const json& source) {
             if(row.contains("spell"))entry["Spell"]=row["spell"];
             if(row.contains("presentation")){entry["Presentation"]=json::array();for(const auto& p:row["presentation"]){json out={{"Phase",p.value("module",std::string{})},{"Class",p.value("path",std::string{})},{"Classification",p.value("classification",std::string{})}};if(p.contains("socket"))out["Socket"]=p["socket"];if(p.contains("parameters"))out["Parameters"]=p["parameters"];entry["Presentation"].push_back(std::move(out));}}
             if(row.contains("authority")){const auto& a=row["authority"];entry["Authority"]={{"Action",a.value("action",std::string{})},{"GraphClass",a.value("graphClass",std::string{})},{"Function",a.value("function",std::string("Trigger"))},{"Bindings",a.value("bindings",json::object())}};if(a.contains("dataAsset"))entry["Authority"]["DataAsset"]=a["dataAsset"];}
+            if(row.contains("consumer")) {
+                const auto& c=row["consumer"];
+                entry["Consumer"]={{"Connection",c.value("connection",std::string{})},
+                    {"Class",c.value("class",std::string{})},
+                    {"Function",c.value("function",std::string("OnRuneSchemaPresentation"))},
+                    {"AllowedKeys",c.value("allowedKeys",json::array())}};
+            }
             if(row.contains("metadata"))entry["Metadata"]=row["metadata"];entries.push_back(std::move(entry));
         }return {{"SchemaVersion",1},{"Entries",std::move(entries)}};
     }
@@ -107,14 +116,15 @@ bool DragonWildsRegistryLoader::OnInitialize() {
 }
 
 nlohmann::json DragonWildsRegistryLoader::NormalizeEntry(const json& entry,const std::string& owner) {
-    Fields(entry,{"Id","Kind","Spell","Presentation","Authority","Metadata"},"registry entry");
+    Fields(entry,{"Id","Kind","Spell","Presentation","Authority","Consumer","Metadata"},"registry entry");
     const auto id=entry.value("Id",std::string{});
     const auto kind=entry.value("Kind",std::string{});
     if(!Identifier(id))throw std::runtime_error("registry Id must use letters, numbers, dot, dash or underscore");
     if(kind!="SpellPresentation" && kind!="UtilitySpellPresentation" && kind!="SkillPresentation"
         && kind!="GameplayEffectPresentation" && kind!="EquipmentPresentation"
         && kind!="PersistentEffect" && kind!="WeatherPresentation"
-        && kind!="WorldPresentation" && kind!="AudioPresentation" && kind!="CosmeticWrapper")
+        && kind!="WorldPresentation" && kind!="AudioPresentation" && kind!="CosmeticWrapper"
+        && kind!="GameplayAuthority")
         throw std::runtime_error("registry Kind is unsupported");
     const auto key=owner+":"+id;
     if(m_keys.contains(key))throw std::runtime_error("duplicate registry key '"+key+"'");
@@ -124,8 +134,8 @@ nlohmann::json DragonWildsRegistryLoader::NormalizeEntry(const json& entry,const
             throw std::runtime_error("registry Spell must be a supported cooked asset path");
         result["spell"]=entry["Spell"];
     }
-    if(!entry.contains("Presentation") && !entry.contains("Authority"))
-        throw std::runtime_error("registry entry requires Presentation or Authority");
+    if(!entry.contains("Presentation") && !entry.contains("Authority") && !entry.contains("Consumer"))
+        throw std::runtime_error("registry entry requires Presentation, Authority or Consumer");
     if(entry.contains("Presentation") && (!entry["Presentation"].is_array()
         || entry["Presentation"].size()>MaxPresentationsPerEntry))
         throw std::runtime_error("registry Presentation must contain at most 64 entries");
@@ -156,7 +166,7 @@ nlohmann::json DragonWildsRegistryLoader::NormalizeEntry(const json& entry,const
         const auto& authority=entry["Authority"];
         Fields(authority,{"Action","GraphClass","DataAsset","Function","Bindings"},"registry authority");
         const auto action=authority.value("Action",std::string{});
-        if(action!="SpawnFollower" && action!="ExecuteGraph")
+        if(action!="SpawnFollower" && action!="ExecuteGraph" && action!="ConsumedItemAuthority")
             throw std::runtime_error("registry Authority Action is unsupported");
         const auto graph=authority.value("GraphClass",std::string{});
         if(!AssetPath(graph) || !graph.ends_with("_C"))
@@ -184,11 +194,36 @@ nlohmann::json DragonWildsRegistryLoader::NormalizeEntry(const json& entry,const
             if(bindings.contains("Follower Data Asset") && bindings["Follower Data Asset"]!=asset)
                 throw std::runtime_error("SpawnFollower DataAsset conflicts with its named binding");
             bindings["Follower Data Asset"]=asset;
+        } else if(action=="ConsumedItemAuthority") {
+            if(asset.empty())throw std::runtime_error("ConsumedItemAuthority requires the cooked consumed ItemData as DataAsset");
+            if(function!="OnConsumeSuccess")throw std::runtime_error("ConsumedItemAuthority must use the native consume-success callback");
+            if(!bindings.empty())throw std::runtime_error("ConsumedItemAuthority does not accept client-selectable bindings");
         } else if(bindings.empty()) {
             throw std::runtime_error("ExecuteGraph authority requires at least one named asset binding");
         }
         result["authority"]={{"action",action},{"graphClass",graph},{"function",function},{"bindings",bindings}};
         if(!asset.empty())result["authority"]["dataAsset"]=asset;
+    }
+    if(entry.contains("Consumer")) {
+        const auto& consumer=entry["Consumer"];
+        Fields(consumer,{"Connection","Class","Function","AllowedKeys"},"registry consumer");
+        const auto connection=consumer.value("Connection",std::string{});
+        const auto classPath=consumer.value("Class",std::string{});
+        const auto function=consumer.value("Function",std::string{"OnRuneSchemaPresentation"});
+        if(!Identifier(connection))throw std::runtime_error("registry Consumer Connection is invalid");
+        if(!AssetPath(classPath)||!classPath.ends_with("_C"))
+            throw std::runtime_error("registry Consumer Class must be a cooked Blueprint class path");
+        if(!Identifier(function))throw std::runtime_error("registry Consumer Function is invalid");
+        if(!consumer.contains("AllowedKeys")||!consumer["AllowedKeys"].is_array()
+            || consumer["AllowedKeys"].empty()||consumer["AllowedKeys"].size()>MaxPresentationKeysPerConsumer)
+            throw std::runtime_error("registry Consumer AllowedKeys requires 1 to 256 identifiers");
+        json allowed=json::array();std::unordered_set<std::string> unique;
+        for(const auto& value:consumer["AllowedKeys"]) {
+            if(!value.is_string()||!Identifier(value.get<std::string>()))
+                throw std::runtime_error("registry Consumer AllowedKeys contains an invalid identifier");
+            if(unique.insert(value.get<std::string>()).second)allowed.push_back(value);
+        }
+        result["consumer"]={{"connection",connection},{"class",classPath},{"function",function},{"allowedKeys",std::move(allowed)}};
     }
     if(entry.contains("Metadata")) {
         if(!entry["Metadata"].is_object() || entry["Metadata"].dump().size()>4096)
@@ -242,17 +277,43 @@ void DragonWildsRegistryLoader::OnLoad(const std::filesystem::path& path,const R
 void DragonWildsRegistryLoader::LoadCookedRegistries() {
     TArray<FAssetData> assets;auto interface=UAssetRegistryHelpers::GetAssetRegistry();auto* registry=static_cast<UAssetRegistry*>(interface.ObjectPointer);
     if(!registry||!registry->GetAllAssets(assets,true)||assets.Num()<0||assets.Num()>262144)throw std::runtime_error("mounted Asset Registry is unavailable or outside the safe bound");
-    for(auto& asset:assets)try {
-        const auto name=RC::to_string(asset.AssetName().ToString());if(!name.starts_with("DA_RuneSchemaRegistry")&&!name.starts_with("RSREG_"))continue;
-        const auto package=RC::to_string(asset.PackageName().ToString()),path=package+"."+name;auto* object=ActorHelper::ResolveObject(PS::ToWideSafe(path.c_str()));
+    std::set<std::string> loaded;
+    const auto consume=[&](UObject* object,const std::string& path,const std::string& expectedOwner) {
         if(!object)throw std::runtime_error("cooked registry asset could not be loaded");
         auto read=[&](const TCHAR* field)->std::string{auto* property=CastField<FStrProperty>(PropertyHelper::GetPropertyByName(object->GetClassPrivate(),field));if(!property)return {};const auto& value=property->GetPropertyValue(property->ContainerPtrToValuePtr<void>(object));const auto& chars=value.GetCharArray();if(chars.Num()<1||!chars.GetData()||chars.GetData()[chars.Num()-1]!=0||chars.Num()>static_cast<int32_t>(MaxCookedRegistryBytes+1))throw std::runtime_error("cooked registry string is invalid or exceeds 256 KiB");return RC::to_string(RC::StringType(chars.GetData(),chars.Num()-1));};
         auto document=read(TEXT("RuneSchemaRegistryJson"));if(document.empty())document=read(TEXT("RegistryJson"));if(document.empty())throw std::runtime_error("asset requires a RuneSchemaRegistryJson or RegistryJson string property");
-        auto owner=read(TEXT("RegistryOwner"));if(owner.empty()){if(package.size()>2&&package[0]=='/'){const auto slash=package.find('/',1);owner=package.substr(1,slash==std::string::npos?slash:slash-1);}if(owner=="Game")throw std::runtime_error("assets under /Game require an explicit RegistryOwner string");}
+        auto owner=read(TEXT("RegistryOwner"));if(owner.empty()) {
+            if(!expectedOwner.empty())throw std::runtime_error("conventional cooked registry asset requires an explicit RegistryOwner");
+            if(path.size()>2&&path[0]=='/') {const auto slash=path.find('/',1);owner=path.substr(1,slash==std::string::npos?slash:slash-1);}
+            if(owner=="Game")throw std::runtime_error("assets under /Game require an explicit RegistryOwner string");
+        }
         if(!Identifier(owner)||owner=="RuneSchema"||owner=="FModel")throw std::runtime_error("cooked RegistryOwner is invalid or reserved");
+        if(!expectedOwner.empty()&&owner!=expectedOwner)throw std::runtime_error("conventional cooked registry owner does not match its enabled mod folder");
         LoadDocument(json::parse(document),owner,"pak:"+path);
+        loaded.insert(path);
         PS::Log<RC::LogLevel::Normal>(STR("Registry: discovered cooked registry asset '{}' owned by '{}'.\n"),PS::ToWideSafe(path.c_str()),PS::ToWideSafe(owner.c_str()));
-    }catch(const std::exception& error){const auto name=RC::to_string(asset.AssetName().ToString());const auto package=RC::to_string(asset.PackageName().ToString());m_audit.push_back({{"Owner","<cooked>"},{"Source","pak:"+package+"."+name},{"Status","Rejected"},{"Reason",error.what()}});PS::Log<RC::LogLevel::Error>(STR("Cooked registry asset '{}' rejected: {}.\n"),PS::ToWideSafe((package+"."+name).c_str()),PS::ToWideSafe(error.what()));}
+    };
+    const auto reject=[&](const std::string& path,const std::exception& error) {
+        m_audit.push_back({{"Owner","<cooked>"},{"Source","pak:"+path},{"Status","Rejected"},{"Reason",error.what()}});
+        PS::Log<RC::LogLevel::Error>(STR("Cooked registry asset '{}' rejected: {}.\n"),PS::ToWideSafe(path.c_str()),PS::ToWideSafe(error.what()));
+    };
+    for(auto& asset:assets) {
+        const auto name=RC::to_string(asset.AssetName().ToString());if(!name.starts_with("DA_RuneSchemaRegistry")&&!name.starts_with("RSREG_"))continue;
+        const auto package=RC::to_string(asset.PackageName().ToString()),path=package+"."+name;
+        try {consume(ActorHelper::ResolveObject(PS::ToWideSafe(path.c_str())),path,{});}
+        catch(const std::exception& error){reject(path,error);}
+    }
+    std::size_t conventional=0;
+    for(const auto& owner:PS::MountedModRegistryOwners::Snapshot()) {
+        const auto name="DA_RuneSchemaRegistry_"+owner;
+        const auto path="/Game/Mods/"+owner+"/Registry/"+name+"."+name;
+        if(loaded.contains(path))continue;
+        auto* object=ActorHelper::ResolveObject(PS::ToWideSafe(path.c_str()));
+        if(!object)continue;
+        try {consume(object,path,owner);++conventional;}
+        catch(const std::exception& error){reject(path,error);}
+    }
+    if(conventional)PS::Log<RC::LogLevel::Normal>(STR("Registry: directly loaded {} conventional cooked declaration{} missing from Asset Registry metadata.\n"),conventional,conventional==1?TEXT(""):TEXT("s"));
 }
 
 void DragonWildsRegistryLoader::WriteMerged() {
