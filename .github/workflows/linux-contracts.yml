@@ -1,0 +1,54 @@
+name: Linux contract tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-26.04
+    env:
+      # $releaseContracts in build/build.ps1, minus three that fail on Linux:
+      # storefront-lanes (<Windows.h>), persistence-diagnostic-ledger (GCC rejects
+      # a braced-init argument), event-definition (assertion failure).
+      TESTS: >-
+        vendor-offers loader-schemas npc-catalog player-activity-events
+        quest-gameplay-owner quest-native-contract quest-definition
+        character-entry-recovery-contract appearance-defaults-contract
+        dialogue-definition building-preview-safety building-clone-contract
+        static-building-assembly-contract owned-save-cleanup-contract
+        resource-additional-drops resource-scale-idempotence niagara-preset
+        time-of-day-contract registry-patch-plan cooked-pak-registry-manifest
+        registry-bridge-lifecycle-contract json-document asset-patch-v2-contract
+        helpy-instant-open plugin-catalog-compatibility recipe-placement-contract
+        loader-folder-case usmap-index native-binding-resolution identity-only-cleanup
+        vendor-category-refresh-contract state-storage-contract
+        equipment-storefront-lane native-contract journal-failure-isolation
+        journal-wingdk-lane journal-save-ownership loader-lifecycle-contract
+        recipe-reference-contract main-menu-log-budget runtime-widget-v08-contract
+        config-settings persistence-mode-contract preview-refresh-contract
+    steps:
+      - uses: actions/checkout@v6
+
+      # config-settings needs glaze; same pin as source/raw/CMakeLists.txt.
+      - uses: actions/checkout@v6
+        with:
+          repository: stephenberry/glaze
+          ref: 3a850807501d98d23bab4bdc5af64d8d4e83e6bc
+          path: .cache/glaze
+
+      - name: Configure
+        run: >-
+          cmake -S source/raw/core -B build/linux-contracts -DCMAKE_BUILD_TYPE=Release
+          -DRUNESCHEMA_JSON_INCLUDE_DIR="$PWD/source/raw/core/json-include"
+          -DRUNESCHEMA_GLAZE_INCLUDE_DIR="$PWD/.cache/glaze/include"
+
+      - name: Build
+        run: cmake --build build/linux-contracts -j"$(nproc)" --target $TESTS
+
+      - name: Test
+        run: ctest --test-dir build/linux-contracts --output-on-failure --no-tests=error -R "^($(tr ' ' '|' <<<"$TESTS"))\$"
