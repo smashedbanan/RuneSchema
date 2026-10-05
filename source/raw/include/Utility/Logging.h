@@ -39,12 +39,14 @@ namespace PS {
     {
         if (optional_arg == RC::LogLevel::Error)
         {
-            auto formatted_log = std::format(STR("[RuneSchema] [error] {}"), content);
+            RC::StringType formatted_log = STR("[RuneSchema] [error] ");
+            formatted_log.append(content.data(), content.size());
             RC::Output::send<optional_arg>(formatted_log, std::forward<FmtArgs>(fmt_args)...);
         }
         else if (optional_arg == RC::LogLevel::Warning)
         {
-            auto formatted_log = std::format(STR("[RuneSchema] [warning] {}"), content);
+            RC::StringType formatted_log = STR("[RuneSchema] [warning] ");
+            formatted_log.append(content.data(), content.size());
             RC::Output::send<optional_arg>(formatted_log, std::forward<FmtArgs>(fmt_args)...);
         }
         else if (optional_arg == RC::LogLevel::Verbose)
@@ -52,13 +54,15 @@ namespace PS {
             auto config = PS::PSConfig::Get();
             if (!config->IsDebugLoggingEnabled()) return;
 
-            auto formatted_log = std::format(STR("[RuneSchema] [diagnostic] {}"), content);
+            RC::StringType formatted_log = STR("[RuneSchema] [diagnostic] ");
+            formatted_log.append(content.data(), content.size());
             RC::Output::send<RC::LogLevel::Normal>(formatted_log, std::forward<FmtArgs>(fmt_args)...);
         }
         else
         {
             if (!PS::PSConfig::Get()->IsDebugLoggingEnabled()) return;
-            auto formatted_log = std::format(STR("[RuneSchema] {}"), content);
+            RC::StringType formatted_log = STR("[RuneSchema] ");
+            formatted_log.append(content.data(), content.size());
             RC::Output::send<optional_arg>(formatted_log, std::forward<FmtArgs>(fmt_args)...);
         }
     }
