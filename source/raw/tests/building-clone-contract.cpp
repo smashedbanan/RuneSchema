@@ -33,6 +33,12 @@ int main(int argc,char** argv) {
         "direct assets are not refreshed before world registration");
     require(loader.find("GetValidBuilding(identity)")!=std::string::npos,
         "registry protection can bypass serial-validated building handles");
+    const auto slotCheck=loader.find("slot->GetUObject()!=retained->second");
+    const auto rootCheck=loader.find("object->IsRootSet()",slotCheck);
+    require(slotCheck!=std::string::npos && rootCheck!=std::string::npos && slotCheck<rootCheck,
+        "transient clone handle recovery can dereference an unverified retained token");
+    require(loader.find("[BUILDING-ASSET][HANDLE-REFRESH]")!=std::string::npos,
+        "transient clone handle recovery is not observable");
     require(loader.find("object=LoadObject(definition.AssetPath)")!=std::string::npos,
         "direct assets are not re-resolved from their stable configured path");
     require(loader.find("definition.Clone?TEXT(\"clone\"):TEXT(\"direct\")")!=std::string::npos,

@@ -104,7 +104,7 @@ namespace DragonWilds {
         bool ProtectWorldRegistry(RC::Unreal::UObject* subsystem);
         bool RefreshBuildingReferencesForWorld();
         bool RefreshBuildingCatalogueForWorld();
-        RC::Unreal::UObject* GetValidBuilding(const RC::StringType& identity) const;
+        RC::Unreal::UObject* GetValidBuilding(const RC::StringType& identity);
         void RememberBuilding(const RC::StringType& identity, RC::Unreal::UObject* object);
         bool CaptureNativeRegistry(RC::Unreal::UObject* subsystem);
         bool RestoreNativeRegistry();
@@ -130,6 +130,7 @@ namespace DragonWilds {
 
         std::vector<BuildingDefinition> m_definitions;
         std::unordered_map<RC::StringType, RC::Unreal::UObject*> m_buildings;
+        std::unordered_map<RC::StringType, int32_t> m_buildingIndices;
         std::unordered_map<RC::StringType, PS::WeakObjectHandle> m_buildingHandles;
         std::unordered_set<RC::StringType> m_applied;
         std::unordered_set<RC::StringType> m_unlocks;

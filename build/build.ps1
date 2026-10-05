@@ -6,7 +6,7 @@ param(
     [switch]$UpdateMappings
 )
 $ErrorActionPreference = 'Stop'
-$Version = '0.7.7.2'
+$Version = '0.7.7.3e'
 $BuildRoot = [IO.Path]::GetFullPath($PSScriptRoot)
 if (-not (Test-Path -LiteralPath (Join-Path $BuildRoot 'source\raw\CMakeLists.txt') -PathType Leaf)) {
     $BuildRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -725,7 +725,7 @@ GITHUB_TOKEN for the RuneSchema repository does not grant that private access.
             @('helpy-instant-open')
         } else {
             @(
-                'vendor-offers','loader-schemas','npc-catalog','npc-cleanup-contract','player-activity-events',
+                'vendor-offers','vendor-spawn-gate','loader-schemas','npc-catalog','npc-cleanup-contract','player-activity-events',
                 'quest-gameplay-owner','quest-native-contract','quest-definition','event-definition',
                 'character-entry-recovery-contract',
                 'appearance-defaults-contract',

@@ -828,8 +828,7 @@ namespace DragonWilds {
             const auto fail = [&] {
                 if (definition.Clone)
                 {
-                    m_buildings.erase(identity);
-                    m_buildingHandles.erase(identity);
+                    RememberBuilding(identity,nullptr);
                     DiscardUncommittedClone(building);
                 }
                 result.Errors++;
@@ -1000,17 +999,46 @@ namespace DragonWilds {
         return building;
     }
 
-    UObject* DragonWildsBuildingModLoader::GetValidBuilding(const RC::StringType& identity) const
+    UObject* DragonWildsBuildingModLoader::GetValidBuilding(const RC::StringType& identity)
     {
         const auto found=m_buildingHandles.find(identity);
-        return found==m_buildingHandles.end()?nullptr:found->second.Get();
+        if(found!=m_buildingHandles.end())if(auto* object=found->second.Get())return object;
+
+        // StaticDuplicateObject can assign/finalize an FUObject serial after a
+        // transient clone is rooted. Recover only when the exact retained
+        // pointer still occupies its original slot and remains rooted. The
+        // slot check happens before the raw token is dereferenced.
+        const auto retained=m_buildings.find(identity);
+        const auto indexed=m_buildingIndices.find(identity);
+        if(retained==m_buildings.end()||indexed==m_buildingIndices.end())return nullptr;
+        auto* slot=indexed->second>=0?FUObjectArray::IndexToObject(indexed->second):nullptr;
+        if(!slot||slot->GetUObject()!=retained->second)return nullptr;
+        auto* object=retained->second;
+        if(!object->IsRootSet()||!m_buildingPieceClass||!object->IsA(m_buildingPieceClass))return nullptr;
+        auto& refreshed=m_buildingHandles[identity];
+        refreshed.Assign(object);
+        if(refreshed.Get()!=object)return nullptr;
+        PS::Log<LogLevel::Verbose>(
+            STR("[BUILDING-ASSET][HANDLE-REFRESH] object='{}' retained_slot={} root=true.\n"),
+            object->GetPathName(),indexed->second);
+        return object;
     }
 
     void DragonWildsBuildingModLoader::RememberBuilding(
         const RC::StringType& identity,UObject* object)
     {
-        if(!object){m_buildings.erase(identity);m_buildingHandles.erase(identity);return;}
+        if(!object){
+            m_buildings.erase(identity);
+            m_buildingIndices.erase(identity);
+            m_buildingHandles.erase(identity);
+            return;
+        }
+        const auto index=object->GetInternalIndex();
+        auto* slot=index>=0?FUObjectArray::IndexToObject(index):nullptr;
+        if(!slot||slot->GetUObject()!=object)
+            throw std::runtime_error("Building retention slot is unavailable");
         m_buildings[identity]=object;
+        m_buildingIndices[identity]=index;
         m_buildingHandles[identity]=PS::WeakObjectHandle(object);
     }
 

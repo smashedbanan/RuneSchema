@@ -1,10 +1,18 @@
-# RuneSchema 0.7.7.2
+# RuneSchema 0.7.7.3e experimental
 
-RuneSchema 0.7.7.2 uses one `main.dll` for Steam/GOG and Game Pass/WinGDK.
+RuneSchema 0.7.7.3e uses one `main.dll` for Steam/GOG and Game Pass/WinGDK.
 The runtime detects the storefront at startup and selects the matching native
 support automatically.
 
 ## What changed
+
+- RuneSchema `/npc` actors are transient and excluded from world-save actor
+  persistence. Older RuneSchema-owned saved NPC shells are retired without
+  touching native NPCs.
+- Rooted `$Clone` building definitions survive the menu-to-world boundary even
+  when Unreal finalizes their transient object serial after creation. Recovery
+  still requires the exact retained object, original object slot, root, and
+  `BuildingPieceData` class.
 
 - Mandatory startup pruning remains registry-driven and removes only
   persistence identities absent from their complete applicable live registry.
