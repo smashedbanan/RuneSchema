@@ -87,11 +87,52 @@ file(GLOB_RECURSE SRC_FILES
 list(FILTER SRC_FILES EXCLUDE REGEX "/src/Core/")
 list(FILTER SRC_FILES EXCLUDE REGEX "/src/Generator/InGameQuickMenu\\.cpp$")
 
+if(NOT WIN32)
+    # Linux port (headless dedicated server): only the units ported so far. A file enters this
+    # list when it compiles on Linux and the library needs it. Kept by hand on purpose: no glob.
+    set(SRC_FILES
+        linux/main.cpp
+        src/Loader/DragonWildsMainLoader.cpp
+        src/Loader/DragonWildsModLoaderBase.cpp
+        src/Loader/DragonWildsRegistryLoader.cpp
+        src/Loader/ModLoadOrder.cpp
+        src/Misc/DragonWildsDataRegistrar.cpp
+        src/Misc/FileWatchWrapper.cpp
+        src/Runtime/HostServices.cpp
+        src/Runtime/RegistryBridge.cpp
+        src/SDK/Classes/Custom/UDataTableStore.cpp
+        src/SDK/Classes/Custom/UObjectGlobals.cpp
+        src/SDK/Classes/KismetSystemLibrary.cpp
+        src/SDK/DragonWildsSignatures.cpp
+        src/SDK/Helper/ActorHelper.cpp
+        src/SDK/Helper/ArrayFieldPatch.cpp
+        src/SDK/Helper/Memory.cpp
+        src/SDK/Helper/PropertyHelper.cpp
+        src/SDK/StaticClassStorage.cpp
+        src/SDK/Structs/Custom/FManagedStruct.cpp
+        src/SDK/Structs/Custom/FManagedValue.cpp
+        src/SDK/Structs/Custom/FScriptArrayHelper.cpp
+        src/SDK/Structs/Custom/FScriptMapHelper.cpp
+        src/SDK/Structs/Custom/FScriptSetHelper.cpp
+        src/SDK/Structs/FSoftObjectPath.cpp
+        src/SDK/UnrealOffsets.cpp
+        src/Utility/Config.cpp
+        src/Utility/JsonHelpers.cpp
+        src/Utility/StartupTrace.cpp)
+endif()
+
 add_library(${TARGET} SHARED
     ${SRC_FILES}
     src/Core/AppearanceDefaults.cpp
     src/Core/CharacterEntryRecovery.cpp
     src/Core/PersistencePruner.cpp)
+
+if(NOT WIN32)
+    # UE4SS loads Mods/RuneSchema/dlls/main.so with dlopen(RTLD_NOW): an unresolved symbol must
+    # fail this link, not the load.
+    set_target_properties(${TARGET} PROPERTIES PREFIX "" OUTPUT_NAME main)
+    target_link_options(${TARGET} PRIVATE -Wl,--no-undefined)
+endif()
 
 # API-1 Helpy native plugin. All Helpy UI/input ownership lives in this optional
 # binary; multiplayer orchestration remains in the mandatory RuneSchema target.
