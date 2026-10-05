@@ -4,8 +4,10 @@
 #include "Utility/InlineHook.h"
 #include "Utility/Logging.h"
 
+#ifdef _WIN32
 #include <Windows.h>
 #include <TlHelp32.h>
+#endif
 
 #include <algorithm>
 #include <cwctype>
@@ -16,6 +18,7 @@ using namespace RC;
 namespace {
 bool StandaloneBypassLoaded()
 {
+#ifdef _WIN32
     const auto snapshot = CreateToolhelp32Snapshot(
         TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
     if (snapshot == INVALID_HANDLE_VALUE) return false;
@@ -37,6 +40,9 @@ bool StandaloneBypassLoaded()
     }
     CloseHandle(snapshot);
     return found;
+#else
+    return false;
+#endif
 }
 }
 

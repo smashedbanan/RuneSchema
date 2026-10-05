@@ -2,12 +2,15 @@
 #include "Runtime/Storefront.h"
 #include "UE4SSProgram.hpp"
 #include "Runtime/Layout.h"
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 #include <stdexcept>
 #include <vector>
 
 namespace PS::HostServices {
     namespace {
+#ifdef _WIN32
         std::filesystem::path LocalAppDataDirectory() {
             const auto required = ::GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
             if (!required) throw std::runtime_error("LOCALAPPDATA is unavailable");
@@ -47,6 +50,7 @@ namespace PS::HostServices {
             return LocalAppDataDirectory() / L"Packages" / family / L"LocalState"
                 / L"RSDragonwilds" / L"Saved" / L"RuneSchema";
         }
+#endif
 
     }
     std::filesystem::path WorkingDirectory() {
@@ -61,15 +65,23 @@ namespace PS::HostServices {
     std::filesystem::path ModDirectory() { return WorkingDirectory() / "Mods" / "RuneSchema"; }
     std::filesystem::path SettingsDirectory() { return ModDirectory() / "settings"; }
     std::filesystem::path StateDirectory() {
+#ifdef _WIN32 // linux-port: where player state lives on a server (stage 4, with the player rules)
         const auto package = PackageStateDirectory();
         return package.empty() ? LegacyStateDirectory() : package;
+#else
+        throw std::runtime_error("RuneSchema state directory is not defined on Linux yet");
+#endif
     }
     std::filesystem::path XboxSaveRoot() {
+#ifdef _WIN32
         if (Storefront::Current() != Storefront::Kind::GamePass) return {};
         const auto family = PackageFamilyName();
         if (family.empty()) return {};
         return LocalAppDataDirectory() / L"Packages" / family
             / L"SystemAppData" / L"wgs";
+#else
+        return {};
+#endif
     }
     std::filesystem::path SavedDirectory() { return RuntimeDirectory() / "saved"; }
     std::filesystem::path CacheDirectory() { return SavedDirectory() / "cache"; }
