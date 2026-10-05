@@ -12,4 +12,10 @@ int main() {
     bool conflict=false;try{aliases.Add(source,L"/Game/Other.Item");}catch(const std::exception&){conflict=true;}
     assert(conflict && aliases.Resolve(source)==runtime);
     aliases.Clear();assert(aliases.Resolve(source)==source);
+    // UE4SS text is UTF-16 in char16_t outside Windows. Explicit returns: assert is compiled out
+    // of Release builds.
+    PS::AssetAliases::BasicRegistry<std::u16string> utf16;
+    utf16.Add(u"/Game/Mods/Set/Hood.Hood",u"/Game/RuneSchema/Armor/Items/hood.hood");
+    if(utf16.Resolve(u"/Game/Mods/Set/Hood.Hood")!=u"/Game/RuneSchema/Armor/Items/hood.hood")return 1;
+    if(utf16.Resolve(u"/Game/Vanilla.Item")!=u"/Game/Vanilla.Item")return 1;
 }
