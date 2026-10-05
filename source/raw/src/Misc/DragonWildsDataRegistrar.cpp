@@ -1,5 +1,7 @@
 #include "Utility/NativeFunctionHook.h"
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 #include <chrono>
 #include <cstring>
 #include <cctype>
@@ -63,6 +65,7 @@ namespace DragonWilds {
                 || static_cast<unsigned char>(bytes[0]) != 0xff
                 || static_cast<unsigned char>(bytes[1]) != 0xfe)
                 return {bytes, false};
+#ifdef _WIN32 // linux-port: UTF-16 character saves (stage 2, when the data registrar is started)
             if ((bytes.size() - 2) % sizeof(wchar_t))
                 throw std::runtime_error("UTF-16 character save has an incomplete code unit");
             std::wstring wide((bytes.size() - 2) / sizeof(wchar_t), L'\0');
@@ -79,6 +82,9 @@ namespace DragonWilds {
                     length, nullptr, nullptr) != length)
                 throw std::runtime_error("UTF-16 character save decoding changed");
             return {std::move(utf8), true};
+#else
+            throw std::runtime_error("UTF-16 character saves are not supported on Linux yet");
+#endif
         }
 
         std::string EncodeCharacterText(const nlohmann::json& document,
@@ -87,6 +93,7 @@ namespace DragonWilds {
             auto text = document.dump(1, '\t', false,
                 nlohmann::json::error_handler_t::strict);
             if (!utf16Le) return text;
+#ifdef _WIN32 // linux-port: UTF-16 character saves (stage 2, when the data registrar is started)
             const auto length = MultiByteToWideChar(CP_UTF8,
                 MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()),
                 nullptr, 0);
@@ -101,6 +108,9 @@ namespace DragonWilds {
             encoded.append(reinterpret_cast<const char*>(wide.data()),
                 wide.size() * sizeof(wchar_t));
             return encoded;
+#else
+            throw std::runtime_error("UTF-16 character saves are not supported on Linux yet");
+#endif
         }
 
         nlohmann::json ParseCharacterText(const std::string& bytes)
@@ -185,6 +195,7 @@ namespace DragonWilds {
 
         std::filesystem::path LocalCharacterSaveDirectory()
         {
+#ifdef _WIN32 // linux-port: character save directory on a server (stage 2, when the data registrar is started)
             const auto required = GetEnvironmentVariableW(
                 L"LOCALAPPDATA", nullptr, 0);
             if (!required) throw std::runtime_error("LOCALAPPDATA is unavailable");
@@ -194,6 +205,9 @@ namespace DragonWilds {
                 throw std::runtime_error("LOCALAPPDATA changed while it was read");
             return std::filesystem::path(value.data()) / L"RSDragonwilds"
                 / L"Saved" / L"SaveCharacters";
+#else
+            throw std::runtime_error("Character save directory is not resolved on Linux yet");
+#endif
         }
 
         std::filesystem::path BackupCharacterSave(
@@ -234,7 +248,7 @@ namespace DragonWilds {
                 } catch (...) {
                     PS::Log<LogLevel::Error>(STR(
                         "[PERSISTENCE-PRUNER][FATAL-RESTORE] '{}' could not be restored automatically; use backup '{}'.\n"),
-                        path.filename().wstring(), backup.filename().wstring());
+                        RC::to_generic_string(path.filename().native()), RC::to_generic_string(backup.filename().native()));
                 }
                 throw;
             }
@@ -418,13 +432,13 @@ namespace DragonWilds {
                         "[PERSISTENCE-PRUNER][STARTUP][ORPHAN-REMOVED] {} '{}' from '{}'.\n"),
                         PS::ToWideSafe(row.value("Kind", std::string("Unknown")).c_str()),
                         PS::ToWideSafe(row.value("Id", std::string("<unknown>")).c_str()),
-                        entry.path().filename().wstring());
+                        RC::to_generic_string(entry.path().filename().native()));
             }
             catch (const std::exception& error)
             {
                 PS::Log<LogLevel::Error>(STR(
                     "[PERSISTENCE-PRUNER][STARTUP][UNCHANGED] '{}' was not modified: {}.\n"),
-                    entry.path().filename().wstring(),
+                    RC::to_generic_string(entry.path().filename().native()),
                     PS::ToWideSafe(error.what()));
             }
         }

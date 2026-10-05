@@ -38,7 +38,7 @@ namespace DragonWilds {
             if (name.empty()) continue;
             if (strict && value != STR("0") && value != STR("1")) {
                 PS::Log<RC::LogLevel::Warning>(STR("Invalid {} value for '{}'; expected 0 or 1. Disabled.\n"),
-                    path.filename().native(), name);
+                    RC::to_generic_string(path.filename().native()), name);
                 entries.push_back({name, false}); continue;
             }
             entries.push_back({name, value != STR("0")});
@@ -50,11 +50,11 @@ namespace DragonWilds {
         fs::create_directories(path.parent_path(), directoryError);
         if (directoryError) {
             PS::Log<RC::LogLevel::Warning>(STR("Load-order directory unavailable: {} ({}).\n"),
-                path.parent_path().native(), PS::ToWideSafe(directoryError.message().c_str()));
+                RC::to_generic_string(path.parent_path().native()), PS::ToWideSafe(directoryError.message().c_str()));
             return false;
         }
         std::ofstream file(path, std::ios::trunc);
-        if (!file) { PS::Log<RC::LogLevel::Warning>(STR("Load-order file is not writable: {}.\n"), path.native()); return false; }
+        if (!file) { PS::Log<RC::LogLevel::Warning>(STR("Load-order file is not writable: {}.\n"), RC::to_generic_string(path.native())); return false; }
         file << "; RuneSchema mod order - loaded top to bottom.\n"
                 "; Use 1 to enable and 0 to disable.\n"
                 "; AA_ and ZZ_ folders are enabled implicitly when omitted. Add one here only to override it.\n";
@@ -72,11 +72,11 @@ namespace DragonWilds {
         fs::create_directories(path.parent_path(), directoryError);
         if (directoryError) {
             PS::Log<RC::LogLevel::Warning>(STR("Load-order directory unavailable: {} ({}).\n"),
-                path.parent_path().native(), PS::ToWideSafe(directoryError.message().c_str()));
+                RC::to_generic_string(path.parent_path().native()), PS::ToWideSafe(directoryError.message().c_str()));
             return false;
         }
         std::ofstream output(path, std::ios::trunc);
-        if (!output) { PS::Log<RC::LogLevel::Warning>(STR("Load-order file is not writable: {}.\n"), path.native()); return false; }
+        if (!output) { PS::Log<RC::LogLevel::Warning>(STR("Load-order file is not writable: {}.\n"), RC::to_generic_string(path.native())); return false; }
         for (const auto& c : comments) output << c << '\n';
         for (const auto& e : entries) output << Narrow(e.Name) << " : " << (e.Enabled ? 1 : 0) << '\n';
         return static_cast<bool>(output);
@@ -204,7 +204,7 @@ namespace DragonWilds {
         std::vector<RC::StringType> discovered;
         for (const auto& entry : fs::directory_iterator(mods))
             if (PS::ModFolderLayout::LooksLikeRuneSchemaMod(entry.path()))
-                discovered.push_back(entry.path().filename().native());
+                discovered.push_back(RC::to_generic_string(entry.path().filename().native()));
         std::set<std::string> active;
         for (const auto& owner : Resolve(mods, discovered)) active.insert(RC::to_string(owner));
         return active;
