@@ -725,7 +725,7 @@ GITHUB_TOKEN for the RuneSchema repository does not grant that private access.
             @('helpy-instant-open')
         } else {
             @(
-                'vendor-offers','loader-schemas','npc-catalog','player-activity-events',
+                'vendor-offers','loader-schemas','npc-catalog','npc-cleanup-contract','player-activity-events',
                 'quest-gameplay-owner','quest-native-contract','quest-definition','event-definition',
                 'character-entry-recovery-contract',
                 'appearance-defaults-contract',

@@ -33,6 +33,19 @@ makes a mod easier to test, update, and remove.
 
 ## How the folders work together
 
+### NPC removal is safe
+
+Actors created through `npc` are transient world actors. RuneSchema recreates
+them from the enabled mod each time a world loads; it does not store the actor
+itself in the character or world save. Quest, dialogue, and other gameplay
+progress still use their normal game-owned save systems.
+
+When an NPC mod is disabled or removed, its actor therefore does not return as
+an invisible collision shell. RuneSchema also recognizes the private identity
+used by older RuneSchema NPC builds and retires those legacy saved shells. It
+does not apply this migration to native game NPCs or actors owned by other
+systems.
+
 A new weapon normally uses:
 
 1. `paks` for the mesh, icon, Blueprint, and cooked item;

@@ -307,6 +307,9 @@ namespace DragonWilds {
         struct SpawnedVendor {
             std::string Key;
             PS::WeakObjectHandle Actor;
+            RC::Unreal::AActor* Token = nullptr;
+            int32_t Index = -1;
+            int32_t Serial = 0;
         };
         std::vector<SpawnedVendor> m_spawnedVendors;
         struct RetiredVendor {
@@ -394,6 +397,9 @@ namespace DragonWilds {
             const std::string& fallbackId = {}, const std::string& storeOwner = {});
 
         void ScanLoadedActors();
+        void QueueLegacyPersistentNpc(RC::Unreal::AActor* actor);
+        void ScanLegacyPersistentNpcs(RC::Unreal::UWorld* world);
+        RC::Unreal::UWorld* m_legacyNpcSweepWorld = nullptr; // compared only; cleared on travel
         void QueueClientReplica(RC::Unreal::AActor* actor);
         bool PrepareClientReplica(RC::Unreal::AActor* actor);
         VendorDefinition* FindClientDefinition(RC::Unreal::AActor* actor);
@@ -431,11 +437,10 @@ namespace DragonWilds {
         void ApplyVendorMaterials(RC::Unreal::UObject* mesh,
             const VendorDefinition& definition) const;
         void ReleaseVendorTracking();
+        void TrackSpawnedVendor(const std::string& key, RC::Unreal::AActor* actor);
+        RC::Unreal::AActor* FindSpawnedVendor(RC::Unreal::UWorld* world,
+            const VendorDefinition& definition) const;
         void OnVendorCellShown(RC::Unreal::UObject* cell);
-        RC::Unreal::AActor* FindPersistentVendor(RC::Unreal::UWorld* world,
-            const VendorDefinition& definition) const;
-        void SetPersistentVendorId(RC::Unreal::AActor* actor,
-            const VendorDefinition& definition) const;
         bool ApplyVendor(RC::Unreal::AActor* actor, VendorDefinition& definition);
         void BindMerchantInteraction(RC::Unreal::AActor* actor,
             RC::Unreal::UObject* interaction, RC::Unreal::UObject* station,

@@ -12,6 +12,12 @@ int main(int argc,char** argv) {
     const auto require=[](bool value){if(!value)throw std::runtime_error("NPC cleanup contract regression");};
     require(loader.find("actor=pending;")!=loader.npos);
     require(loader.find("QueueNpcCleanup(actor);")!=loader.npos);
+    require(loader.find("SetPersistentVendorId")==loader.npos);
+    require(loader.find("HelpyNpcGuards::Exclude(pending);")!=loader.npos);
+    require(loader.find("HelpyNpcGuards::VerifyExcluded(actor);")!=loader.npos);
+    require(loader.find("words[0]!=VendorIdentity::Magic")!=loader.npos);
+    require(loader.find("QueueLegacyPersistentNpc(actor)")!=loader.npos);
+    require(loader.find("FindSpawnedVendor")!=loader.npos);
     require(loader.find("PumpNpcCleanup(deltaSeconds);")<loader.find("if (m_definitions.empty() || m_scanBudget.Exhausted()) return;"));
     require(cleanup.find("m_pendingNpcCleanup.empty()")!=cleanup.npos);
     require(cleanup.find("slot->GetUObject()!=actor")<cleanup.find("IsNpcObjectUsable(actor)"));

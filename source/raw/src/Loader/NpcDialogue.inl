@@ -302,7 +302,7 @@ void DragonWildsNpcLoader::NpcGoAway(const std::string& key,const std::string& r
     if(found==m_definitions.end())throw std::runtime_error("NpcGoAway references a missing NPC: "+key);
     found->Enabled=false;
     auto* world=FindLoadedWorld();
-    auto* actor=world?FindPersistentVendor(world,*found):nullptr;
+    auto* actor=world?FindSpawnedVendor(world,*found):nullptr;
     if(actor) {
         ActorHelper::FunctionCall(actor,TEXT("/Script/Engine.Actor:SetLifeSpan")).Arg(TEXT("InLifespan"),0.25f).Invoke();
     }
@@ -1035,7 +1035,7 @@ void DragonWildsNpcLoader::PumpDialogueShop() {
         const auto found=std::find_if(m_definitions.begin(),m_definitions.end(),[&](const auto& d){return d.ModName+":"+d.Id==key;});
         if(found==m_definitions.end() || !found->Enabled)throw std::runtime_error("Dialogue shop NPC is no longer enabled");
         const auto definition=*found;
-        auto* actor=FindPersistentVendor(player->GetWorld(),definition);
+        auto* actor=FindSpawnedVendor(player->GetWorld(),definition);
         if(!actor)throw std::runtime_error("Dialogue shop NPC is no longer present");
         OpenNpcShop(actor,player,definition);
     } catch(const std::exception& error) {

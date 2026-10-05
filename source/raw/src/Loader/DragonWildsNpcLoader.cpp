@@ -490,7 +490,10 @@ namespace DragonWilds {
         }
 
         m_actorObserverId=DragonWildsBlueprintModLoader::RegisterActorInitializedObserver(
-            [this](AActor* actor){try{QueueClientReplica(actor);}catch(...) {}});
+            [this](AActor* actor){
+                try { QueueLegacyPersistentNpc(actor); } catch(...) {}
+                try { QueueClientReplica(actor); } catch(...) {}
+            });
         m_clientShopFunction=UECustom::UObjectGlobals::StaticFindObject<UFunction*>(
             nullptr,nullptr,TEXT("/Script/Dominion.DominionPlayerController:Client_ToggleCraftingMenu"));
         m_clientShopHookId=PS::RegisterNativePreHook(m_clientShopFunction,
@@ -646,6 +649,14 @@ namespace DragonWilds {
                 PumpHelpyNpcs();
                 PumpNpcCleanup(deltaSeconds);
                 ReconcileNpcScales(deltaSeconds);
+                try {
+                    if(auto* world=FindLoadedWorld();world && world!=m_legacyNpcSweepWorld) {
+                        m_legacyNpcSweepWorld=world;
+                        ScanLegacyPersistentNpcs(world);
+                    }
+                } catch(const std::exception& error) {
+                    WarnOnce("legacy-npc-sweep",PS::ToWideSafe(error.what()));
+                }
                 // The current game build no longer exposes a reflected
                 // day/night transition function.  Re-read its native actor
                 // fields at a bounded cadence, and only when a definition
@@ -720,6 +731,7 @@ namespace DragonWilds {
                 m_acquisitionBaselines.clear();
                 m_interactionTraceBudget.Reset();
                 m_interactionTrace = nlohmann::json::array();
+                m_legacyNpcSweepWorld=nullptr;
                 try {
                     WriteVendorInteractionTrace();
                 } catch (...) { /* Optional trace I/O cannot interrupt map cleanup. */ }
@@ -1670,13 +1682,14 @@ namespace DragonWilds {
                 ApplyNetworkDialogueCue(actor,ReadIdentity(actor->GetComponentsByClass(RequireIdentityClass())[0]));
                 return true;
             }
-            if(auto* existing=FindPersistentVendor(actor->GetWorld(),definition);existing && existing!=actor)
+            if(auto* existing=FindSpawnedVendor(actor->GetWorld(),definition);existing && existing!=actor)
                 throw std::runtime_error("Multiple live client NPCs match one definition");
         }
         std::erase_if(m_merchantBindings,[&](const auto& binding){return binding.DefinitionKey==key;});
         m_applied.erase(ActorKey(actor,definition));
         if(definition.InlineMerchant)CreateInlineMerchantRow(definition);
-        SetPersistentVendorId(actor,definition);
+        HelpyNpcGuards::Exclude(actor);
+        HelpyNpcGuards::VerifyExcluded(actor);
         actor->SetActorScale3D(FVector(definition.SpawnScale[0],definition.SpawnScale[1],definition.SpawnScale[2]));
         ApplyVendorDisplayName(actor,definition);
         if(!ApplyVendorVisuals(actor,definition))return false;
@@ -1688,7 +1701,7 @@ namespace DragonWilds {
         if(visual)m_applied.insert(ActorKey(actor,definition));
         else if(!ApplyVendor(actor,definition))throw std::runtime_error("Replicated NPC merchant setup failed");
         std::erase_if(m_spawnedVendors,[&](const auto& entry){return entry.Key==key;});
-        m_spawnedVendors.push_back({key,PS::WeakObject(actor)});
+        TrackSpawnedVendor(key,actor);
         ApplyNetworkDialogueCue(actor,ReadIdentity(actor->GetComponentsByClass(RequireIdentityClass())[0]));
         definition.SpawnGate.Begin();
         return true;
@@ -1884,7 +1897,8 @@ namespace DragonWilds {
                 [&](const auto& entry) { return entry.Key == key; });
             if (alreadySpawned != m_spawnedVendors.end())
             {
-                continue;
+                if(FindSpawnedVendor(world,definition))continue;
+                m_spawnedVendors.erase(alreadySpawned);
             }
 
             try
@@ -1911,7 +1925,7 @@ namespace DragonWilds {
                 }
                 if (auto* actor = SpawnVisualVendor(world, definition))
                 {
-                    m_spawnedVendors.push_back({ key, PS::WeakObject(actor) });
+                    TrackSpawnedVendor(key,actor);
                 }
                 else
                 {
@@ -1958,8 +1972,7 @@ namespace DragonWilds {
             (void)RequireIdentityClass();
             (void)NpcIdentity::Encode(definition.ModName,definition.Id,NetworkDefinitionFingerprint(world,definition));
         }
-        auto* actor = definition.HelpyTemporary?nullptr:FindPersistentVendor(world, definition);
-        bool restored = actor != nullptr;
+        AActor* actor = nullptr;
         const auto retire=[&] {
             if(!actor)return;
             const auto index=actor->GetInternalIndex();
@@ -2072,7 +2085,6 @@ namespace DragonWilds {
                 quarantine();
                 retire();
                 actor=nullptr;
-                restored=false;
                 RecordPhase(definition,"Placement.Replacing",nullptr,
                     {{"PreviousLocation",location},{"Location",definition.TargetLocation},
                      {"NetworkIdentityReplacement",identityChanged},{"PreviousName",previousName},
@@ -2096,8 +2108,7 @@ namespace DragonWilds {
                 if(multiplayer && (!pending->Rename(RC::to_generic_string(definition.NetworkActorName).c_str())
                     || RC::to_string(pending->GetName())!=definition.NetworkActorName))
                     throw std::runtime_error("Stable network NPC name could not be assigned exactly");
-                if(definition.HelpyTemporary)HelpyNpcGuards::Exclude(pending);
-                else SetPersistentVendorId(pending, definition);
+                HelpyNpcGuards::Exclude(pending);
                 RecordPhase(definition, "Spawn.Allocated", pending);
                 for (const auto* field : {TEXT("AutoPossessAI"), TEXT("AutoPossessPlayer")}) {
                     if (auto* property = PropertyHelper::GetPropertyByName(pending->GetClassPrivate(), field))
@@ -2116,9 +2127,9 @@ namespace DragonWilds {
         }
 
         if (!actor) throw std::runtime_error("SpawnActor returned null");
-        if(definition.HelpyTemporary)HelpyNpcGuards::VerifyExcluded(actor);
-        RecordPhase(definition, restored ? "Persistence.Reused" : "Spawn.Finished", actor,
-            {{"RestoredActor", restored}, {"PersistentGuidWords", definition.PersistentId}});
+        HelpyNpcGuards::VerifyExcluded(actor);
+        RecordPhase(definition, "Spawn.Finished", actor,
+            {{"TransientActor", true}, {"SaveExcluded", true}});
 
             actor->SetActorScale3D(FVector(
                 definition.SpawnScale[0], definition.SpawnScale[1],
@@ -2173,7 +2184,7 @@ namespace DragonWilds {
 
             PS::RoutineLog("npc",STR("NPC '{}:{}' {}.\n"),
                 RC::to_generic_string(definition.ModName),RC::to_generic_string(definition.Id),
-                restored?TEXT("restored"):TEXT("created"));
+                TEXT("created as a transient world actor"));
             return actor;
         }
         catch (...)
@@ -2759,12 +2770,38 @@ namespace DragonWilds {
         m_pendingClientReplicas.clear();
         m_pendingLoreRequests.clear();
         m_clientReplicaElapsed=0;
-        // The save system owns successful persistent actors. Teardown releases
-        // our transient references; the next session repairs the same GUID.
+        // /npcs actors are session-owned and excluded from save persistence.
+        // World teardown owns their native destruction; release only our handles.
         m_merchantBindings.clear();
         m_spawnedVendors.clear();
         m_retiredVendors.clear();
         m_npcNames.clear();
+        m_legacyNpcSweepWorld=nullptr;
+    }
+
+    void DragonWildsNpcLoader::TrackSpawnedVendor(const std::string& key,AActor* actor)
+    {
+        if(!actor)throw std::runtime_error("Cannot track a missing NPC actor");
+        const auto index=actor->GetInternalIndex();
+        auto* slot=index>=0?FUObjectArray::IndexToObject(index):nullptr;
+        if(!slot || slot->GetUObject()!=actor)
+            throw std::runtime_error("NPC tracking identity unavailable");
+        std::erase_if(m_spawnedVendors,[&](const auto& entry){return entry.Key==key;});
+        m_spawnedVendors.push_back({key,PS::WeakObject(actor),actor,index,slot->GetSerialNumber()});
+    }
+
+    AActor* DragonWildsNpcLoader::FindSpawnedVendor(UWorld* world,
+        const VendorDefinition& definition) const
+    {
+        const auto key=definition.ModName+":"+definition.Id;
+        const auto entry=std::find_if(m_spawnedVendors.begin(),m_spawnedVendors.end(),
+            [&](const auto& candidate){return candidate.Key==key;});
+        if(entry==m_spawnedVendors.end())return nullptr;
+        auto* slot=entry->Index>=0?FUObjectArray::IndexToObject(entry->Index):nullptr;
+        if(!slot || slot->GetUObject()!=entry->Token || slot->GetSerialNumber()!=entry->Serial)
+            return nullptr;
+        auto* actor=entry->Token;
+        return actor->GetWorld()==world && IsNpcObjectUsable(actor)?actor:nullptr;
     }
 
     void DragonWildsNpcLoader::OnVendorCellShown(UObject* object)
@@ -2781,16 +2818,8 @@ namespace DragonWilds {
             const auto x = definition.TargetLocation[0], y = definition.TargetLocation[1];
             if (x > bounds->Min.X() && x < bounds->Max.X()
                 && y > bounds->Min.Y() && y < bounds->Max.Y()
-                && (definition.CellReadyWorld != world || definition.GroundToSurface)) {
+                && definition.CellReadyWorld != world) {
                 definition.CellReadyWorld = world;
-                if(definition.GroundToSurface) {
-                    const auto key=definition.ModName+":"+definition.Id;
-                    // World Partition can restore a saved proxy without a
-                    // full map teardown. Re-run its ground trace and transform
-                    // verification whenever the containing cell is shown.
-                    std::erase_if(m_spawnedVendors,[&](const auto& entry){return entry.Key==key;});
-                    definition.SpawnGate.ResetForMap();
-                }
                 m_scanBudget.ResetForMap();
             }
         }
@@ -2882,10 +2911,7 @@ namespace DragonWilds {
                 continue;
             }
             if(entry==m_spawnedVendors.end())continue;
-            // Constructed UE4SS weak handles may carry serial zero. Resolve the
-            // owned persistent GUID again instead of trusting that weak handle
-            // for a lifecycle transition.
-            auto* actor=FindPersistentVendor(world,definition);
+            auto* actor=FindSpawnedVendor(world,definition);
             if(!actor || !IsNpcObjectUsable(actor)) {
                 m_spawnedVendors.erase(entry);
                 continue;
@@ -2939,46 +2965,45 @@ namespace DragonWilds {
         }
     }
 
-    void DragonWildsNpcLoader::SetPersistentVendorId(AActor* actor,
-        const VendorDefinition& definition) const
+    void DragonWildsNpcLoader::QueueLegacyPersistentNpc(AActor* actor)
     {
-        auto* property = VendorGuidProperty(actor);
-        if (!property) throw std::runtime_error("Vendor requires a reflected 16-byte SpudGuid");
-        std::memcpy(property->ContainerPtrToValuePtr<void>(actor),
-            definition.PersistentId.data(), sizeof(definition.PersistentId));
+        if(!actor || !IsNpcObjectUsable(actor))return;
+        auto* property=VendorGuidProperty(actor);
+        if(!property)return;
+        VendorIdentity::Words words{};
+        std::memcpy(words.data(),property->ContainerPtrToValuePtr<void>(actor),sizeof(words));
+        if(words[0]!=VendorIdentity::Magic)return;
+        ActorHelper::FunctionCall authority(actor,TEXT("/Script/Engine.Actor:HasAuthority"));authority.Invoke();
+        if(!authority.Result<bool>())return;
+
+        // This magic belongs exclusively to legacy RuneSchema /npcs actors.
+        // Strip their save identity before queued native destruction so a crash
+        // or interrupted cleanup cannot write the invisible collision shell back.
+        actor->SetFlags(RF_Transient);
+        if(auto* skip=HelpyNpcGuards::Skip(actor->GetClassPrivate()))
+            skip->SetPropertyValue(skip->ContainerPtrToValuePtr<void>(actor),true);
+        const VendorIdentity::Words empty{};
+        std::memcpy(property->ContainerPtrToValuePtr<void>(actor),empty.data(),sizeof(empty));
+        try { ActorHelper::FunctionCall(actor,TEXT("/Script/Engine.Actor:SetActorEnableCollision"))
+            .Arg(TEXT("bNewActorEnableCollision"),false).Invoke(); } catch(...) {}
+        try { ActorHelper::FunctionCall(actor,TEXT("/Script/Engine.Actor:SetActorHiddenInGame"))
+            .Arg(TEXT("bNewHidden"),true).Invoke(); } catch(...) {}
+        QueueNpcCleanup(actor);
+        WarnOnce("legacy-persistent-npc",TEXT("Legacy saved RuneSchema NPC proxies were found and retired; /npcs actors are now transient and will be recreated only while their mod is enabled."));
     }
 
-    AActor* DragonWildsNpcLoader::FindPersistentVendor(UWorld* world,
-        const VendorDefinition& definition) const
+    void DragonWildsNpcLoader::ScanLegacyPersistentNpcs(UWorld* world)
     {
-        auto* actorClass = UECustom::UObjectGlobals::StaticFindObject<UClass*>(
-            nullptr, nullptr, TEXT("/Script/Engine.Actor"));
-        if (!actorClass) throw std::runtime_error("Actor class unavailable for persistent vendor lookup");
+        if(!world)return;
+        auto* actorClass=UECustom::UObjectGlobals::StaticFindObject<UClass*>(
+            nullptr,nullptr,TEXT("/Script/Engine.Actor"));
+        if(!actorClass)throw std::runtime_error("Actor class unavailable for the legacy /npcs migration");
         TArray<UObject*> objects;
-        UECustom::UObjectGlobals::GetObjectsOfClass(actorClass, objects, true,
-            static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject | RF_NeedLoad
-                | RF_NeedPostLoad | RF_NeedInitialization | RF_BeginDestroyed | RF_FinishDestroyed));
-        AActor* match = nullptr;
-        for (auto* object : objects) {
-            if (!object || object->GetWorld() != world) continue;
-            auto* property = VendorGuidProperty(object);
-            if (!property) continue;
-            if (std::memcmp(property->ContainerPtrToValuePtr<void>(object),
-                definition.PersistentId.data(), sizeof(definition.PersistentId)) != 0) continue;
-            if(!IsNpcObjectUsable(object))continue;
-            const auto index=object->GetInternalIndex();
-            auto* slot=index>=0?FUObjectArray::IndexToObject(index):nullptr;
-            if(slot && slot->GetUObject()==object
-                && std::any_of(m_retiredVendors.begin(),m_retiredVendors.end(),[&](const auto& old) {
-                    return VendorIdentity::RetiredInstanceMatches(old.Address,object,old.Index,index,
-                        old.Serial,slot->GetSerialNumber(),old.Path==object->GetPathName());
-                }))continue;
-            if (!object->IsA(definition.BaseActorClass))
-                throw std::runtime_error("Vendor GUID belongs to a different actor class; refusing replacement");
-            if (match) throw std::runtime_error("Multiple actors share the vendor GUID; refusing spawn/adoption");
-            match = static_cast<AActor*>(object);
-        }
-        return match;
+        UECustom::UObjectGlobals::GetObjectsOfClass(actorClass,objects,true,
+            static_cast<EObjectFlags>(RF_ClassDefaultObject|RF_ArchetypeObject|RF_NeedLoad
+                |RF_NeedPostLoad|RF_NeedInitialization|RF_BeginDestroyed|RF_FinishDestroyed));
+        for(auto* object:objects)if(object && object->GetWorld()==world)
+            QueueLegacyPersistentNpc(static_cast<AActor*>(object));
     }
 
     bool DragonWildsNpcLoader::ApplyVendor(
@@ -3392,9 +3417,9 @@ namespace DragonWilds {
                 | RF_ArchetypeObject | RF_BeginDestroyed | RF_FinishDestroyed)))
                 throw std::runtime_error("interaction source is not a live instance");
             if (!source->GetWorld()) throw std::runtime_error("interaction source has no world");
-            auto* actor = definition->HelpyTemporary?FindHelpyNpc(source->GetWorld(),*definition):FindPersistentVendor(source->GetWorld(), *definition);
+            auto* actor = definition->HelpyTemporary?FindHelpyNpc(source->GetWorld(),*definition):FindSpawnedVendor(source->GetWorld(),*definition);
             if (!actor || source->GetOuterPrivate() != actor)
-                throw std::runtime_error("interaction source is not owned by the unique saved or Helpy-leased vendor");
+                throw std::runtime_error("interaction source is not owned by the tracked transient or Helpy-leased vendor");
             auto findOwned = [&](UClass* type) -> UObject* {
                 if (!type) throw std::runtime_error("component class unavailable");
                 UObject* found = nullptr;
